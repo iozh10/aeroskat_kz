@@ -2,7 +2,8 @@ import cv2
 from ultralytics import YOLO
 import torch
 
-model = YOLO('best.pt')
+model = YOLO('last.pt')
+
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 if device == 'cuda':
