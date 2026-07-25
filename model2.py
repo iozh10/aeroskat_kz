@@ -23,51 +23,53 @@ print("Для остановки нажмите Ctrl+C в терминале.\n"
 
 try:
     while True:
-        result = subprocess.run([
-            'rpicam-still',
-            '--width', str(WIDTH),
-            '--height', str(HEIGHT),
-            '--quality', '80',
-            '--timeout', '1',
-            '--encoding', 'jpg',
-            '--nopreview',
-            '-o', '-'
-        ], capture_output=True, timeout=2)
+        try:
+            # Захват одного кадра через rpicam-still
+            result = subprocess.run([
+                'rpicam-still',
+                '--width', str(WIDTH),
+                '--height', str(HEIGHT),
+                '--quality', '80',
+                '--timeout', '50',      # Уменьшили задержку камеры до 50 мс
+                '--encoding', 'jpg',
+                '--nopreview',
+                '-o', '-'              # Вывод в stdout
+            ], capture_output=True, timeout=5) # Увеличили таймаут Python до 5 секунд
 
-        if result.returncode != 0 or not result.stdout:
-            print("Ошибка захвата кадра с камеры. Пропускаем...")
+            if result.returncode != 0 or not result.stdout:
+                continue
+
+            # Преобразование байтов JPEG в numpy-массив
+            img_np = np.frombuffer(result.stdout, dtype=np.uint8)
+            frame = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                continue
+
+            # Предикт модели YOLO
+            results = model.predict(
+                source=frame,
+                conf=0.3,
+                imgsz=WIDTH,
+                device=device,
+                verbose=False
+            )
+
+            # Отрисовка рамок поверх кадра
+            annotated_frame = results[0].plot()
+
+            # Запись обработанного кадра в видеофайл
+            out.write(annotated_frame)
+
+        except subprocess.TimeoutExpired:
+            # Если камера "задумалась", просто пропускаем этот кадр, а не роняем скрипт
+            print("Превышено время ожидания кадра от камеры, пропуск...")
             continue
-
-        img_np = np.frombuffer(result.stdout, dtype=np.uint8)
-        frame = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-
-        if frame is None:
-            continue
-
-        results = model.predict(
-            source=frame,
-            conf=0.3,
-            imgsz=WIDTH,
-            device=device,
-            verbose=False
-        )
-
-        boxes = results[0].boxes
-        if len(boxes) > 0:
-            for box in boxes:
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                confidence = float(box.conf[0])
-                cls_id = int(box.cls[0])
-                class_name = model.names[cls_id]
-                print(f"Обнаружено: {class_name:<10} | Точность: {confidence*100:.1f}% | Координаты: [{int(x1)}, {int(y1)}, {int(x2)}, {int(y2)}]")
-
-        annotated_frame = results[0].plot()
-
-        out.write(annotated_frame)
 
 except KeyboardInterrupt:
     print("\nОстановка записи пользователем (Ctrl+C).")
 
 finally:
+    # Обязательно освобождаем ресурс записи, чтобы файл не бился
     out.release()
-    print(f"Видео успешно сохранено! Вы можете найти файл '{OUTPUT_FILE}' на флешке.")
+    print(f"Видео успешно сохранено в '{OUTPUT_FILE}'.")
